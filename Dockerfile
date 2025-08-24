@@ -15,8 +15,8 @@ FROM ubuntu:22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R1: Install system dependencies required for the build.
-# MODIFIED: Added 'lsb-release' which is a dependency for the llvm.sh script
-# to correctly identify the OS distribution.
+# MODIFIED: Added 'software-properties-common' and 'gnupg' as required by the
+# llvm.sh script to add the repository and handle signing keys.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -26,7 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10-venv \
     cmake \
     build-essential \
-    lsb-release
+    lsb-release \
+    software-properties-common \
+    gnupg
 
 # R1: Install clang-18 as specified in the bitnet.cpp documentation.
 RUN wget https://apt.llvm.org/llvm.sh && \
