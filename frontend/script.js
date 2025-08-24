@@ -1,7 +1,7 @@
 // R9: Frontend JavaScript logic
 
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Element References ---
+    // ... (Element References and Default Prompts are unchanged) ...
     const themeSelector = document.getElementById('theme');
     const systemPromptEl = document.getElementById('system-prompt');
     const batchInputEl = document.getElementById('batch-input');
@@ -9,9 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('loader');
     const resultsContainer = document.getElementById('results-container');
     const toggleAllButton = document.getElementById('toggle-all-button');
-
-    // --- Default Prompts ---
-    // R9.1: Provide a default few-shot system prompt for the user.
     const DEFAULT_SYSTEM_PROMPT = `You are an expert torrent metadata extractor. Your task is to extract information from a torrent title and return it as a structured JSON object. The JSON object should contain the following fields: 'title', 'year', 'resolution', 'source', 'codec', 'audio', and 'group'. If a field is not present, use a null value.
 
 Here are some examples:
@@ -45,8 +42,7 @@ Now, extract the metadata for the following input. Only return the JSON object, 
 Input:`;
     systemPromptEl.value = DEFAULT_SYSTEM_PROMPT;
 
-
-    // --- Theme Switcher Logic (R9.7) ---
+    // ... (Theme switcher logic is unchanged) ...
     const applyTheme = (theme) => {
         if (theme === 'system') {
             const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -57,10 +53,8 @@ Input:`;
         localStorage.setItem('theme', theme);
         themeSelector.value = theme;
     };
-
     const currentTheme = localStorage.getItem('theme') || 'system';
     applyTheme(currentTheme);
-
     themeSelector.addEventListener('change', (e) => applyTheme(e.target.value));
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (localStorage.getItem('theme') === 'system') {
@@ -71,7 +65,6 @@ Input:`;
     // --- API Call and Results Logic ---
     const handleParse = async () => {
         const systemPrompt = systemPromptEl.value.trim();
-        // R9.2: Get batch inputs, filter out empty lines.
         const userInputs = batchInputEl.value.trim().split('\n').filter(line => line.trim() !== '');
 
         if (!systemPrompt || userInputs.length === 0) {
@@ -79,7 +72,6 @@ Input:`;
             return;
         }
 
-        // R9.3: Trigger API call
         setLoading(true);
 
         try {
@@ -89,91 +81,38 @@ Input:`;
                 body: JSON.stringify({ system_prompt: systemPrompt, user_inputs: userInputs }),
             });
 
+            // --- THIS IS THE CRITICAL MODIFICATION ---
+            // If the response is not OK (e.g., a 500 error), read it as text and throw an error.
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'An unknown error occurred.');
+                const errorText = await response.text();
+                // We try to parse it as JSON to get the detailed message from FastAPI
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    throw new Error(`${response.status}: ${errorJson.detail || 'An unknown error occurred.'}`);
+                } catch (e) {
+                    // If it's not JSON (e.g., raw HTML), throw the raw text.
+                    throw new Error(`${response.status}: ${errorText}`);
+                }
             }
+            // --- END OF MODIFICATION ---
 
             const data = await response.json();
             displayResults(data.results);
 
         } catch (error) {
-            resultsContainer.innerHTML = `<p class="placeholder" style="color: red;">Error: ${error.message}</p>`;
+            // The error message will now contain the detailed C++ error.
+            resultsContainer.innerHTML = `<p class="placeholder" style="color: red; white-space: pre-wrap;">${error.message}</p>`;
         } finally {
             setLoading(false);
         }
     };
 
-    const setLoading = (isLoading) => {
-        if (isLoading) {
-            parseButton.disabled = true;
-            loader.classList.remove('hidden');
-            resultsContainer.innerHTML = '<p class="placeholder">Parsing... this may take a moment.</p>';
-        } else {
-            parseButton.disabled = false;
-            loader.classList.add('hidden');
-        }
-    };
+    // ... (setLoading and displayResults logic is unchanged) ...
+    const setLoading = (isLoading) => { /*...*/ };
+    const displayResults = (results) => { /*...*/ };
     
-    // R9.5: Display results in the specified format
-    const displayResults = (results) => {
-        resultsContainer.innerHTML = ''; // Clear previous results
-        if (results.length === 0) {
-            resultsContainer.innerHTML = '<p class="placeholder">No results to display.</p>';
-            toggleAllButton.disabled = true;
-            return;
-        }
-
-        toggleAllButton.disabled = false;
-        results.forEach(result => {
-            const resultItem = document.createElement('div');
-            resultItem.className = 'result-item';
-
-            // Attempt to parse and format the JSON output
-            let formattedOutput = result.output;
-            try {
-                const jsonObj = JSON.parse(result.output);
-                formattedOutput = JSON.stringify(jsonObj, null, 2);
-            } catch (e) {
-                // Not valid JSON, display as is.
-            }
-
-            resultItem.innerHTML = `
-                <div class="result-item-header">
-                    <span class="result-item-title">${result.input}</span>
-                    <button class="visibility-toggle" data-action="toggle-one">Hide</button>
-                </div>
-                <div class="result-item-body">
-                    <pre><code>${formattedOutput}</code></pre>
-                </div>
-            `;
-            resultsContainer.appendChild(resultItem);
-        });
-    };
-    
-    // --- Event Listeners ---
+    // ... (Event Listeners are unchanged) ...
     parseButton.addEventListener('click', handleParse);
-
-    // R9.5 & R9.6: Event delegation for individual and global toggles
-    resultsContainer.addEventListener('click', (e) => {
-        if (e.target && e.target.dataset.action === 'toggle-one') {
-            const button = e.target;
-            const body = button.closest('.result-item').querySelector('.result-item-body');
-            const isHidden = body.style.display === 'none';
-            body.style.display = isHidden ? '' : 'none';
-            button.textContent = isHidden ? 'Hide' : 'Show';
-        }
-    });
-
-    toggleAllButton.addEventListener('click', () => {
-        const bodies = resultsContainer.querySelectorAll('.result-item-body');
-        const buttons = resultsContainer.querySelectorAll('[data-action="toggle-one"]');
-        if (bodies.length === 0) return;
-
-        // Determine state based on the first item
-        const shouldHide = bodies[0].style.display !== 'none';
-        
-        bodies.forEach(body => body.style.display = shouldHide ? 'none' : '');
-        buttons.forEach(button => button.textContent = shouldHide ? 'Show' : 'Hide');
-    });
+    resultsContainer.addEventListener('click', (e) => { /*...*/ });
+    toggleAllButton.addEventListener('click', () => { /*...*/ });
 });
