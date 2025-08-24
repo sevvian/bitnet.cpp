@@ -1,8 +1,26 @@
-.git 
-.github 
-**/pycache 
-*.pyc 
-models 
-logs 
-node_modules
-.DS_Store
+# R7: Production Grade - Ignore files to keep the build context small and clean.
+
+# Git version control files
+.git
+.gitignore
+
+# Local development and IDE folders
+.vscode/
+.idea/
+
+# Local build artifacts
+build/
+dist/
+*.egg-info/
+
+# Python virtual environments and cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local models directory (to avoid including local models in the image build context)
+models/
+
+# Documentation files
+*.md
