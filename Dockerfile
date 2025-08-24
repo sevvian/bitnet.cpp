@@ -48,15 +48,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # huggingface-cli is required for downloading models.
 RUN pip install --no-cache-dir "huggingface-hub[cli]"
 
-# R4: Download the specified GGUF model from Hugging Face.
-# We disable symlinks to ensure files are fully copied within the Docker layer.
-RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir /app/models/BitNet-b1.58-2B-4T-gguf --local-dir-use-symlinks False
+# R4: MODIFIED - Download the BASE model repository, not the pre-quantized GGUF.
+# This is required as input for the setup_env.py script.
+RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T --local-dir /app/models/BitNet-b1.58-2B-4T --local-dir-use-symlinks False
+
+# R3: MODIFIED - Execute the setup_env.py script. THIS IS THE CRITICAL FIX.
+# This script prepares the environment by quantizing the model AND, crucially,
+# generating or linking the source files (like bitnet-lut-kernels.h) needed by CMake.
+RUN python setup_env.py -md /app/models/BitNet-b1.58-2B-4T -q i2_s
 
 # R3: Build the bitnet.cpp project using CMake and Clang.
-# R6: This builds for a generic x86_64 architecture.
-# MODIFIED: Added the -DBN_BUILD=ON flag. This is crucial for enabling the
-# custom BitNet kernels and linking the necessary source files, which resolves
-# the "Cannot find source file" error.
+# The -DBN_BUILD=ON flag is still required to instruct CMake to use the BitNet-specific build paths.
 RUN mkdir build && \
     cd build && \
     CC=clang-18 CXX=clang++-18 cmake -DBN_BUILD=ON .. && \
@@ -101,7 +103,8 @@ COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
 
-# R4: Copy the downloaded model into the final image.
+# R4: Copy the processed model directory into the final image.
+# The GGUF file will be located inside this directory after setup_env.py runs.
 COPY --from=builder --chown=bitnet:bitnet /app/models /app/models
 
 # Copy the API and frontend code
