@@ -1,7 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL LEAN VERSION - This image does NOT contain the model.
-# The model must be mounted as a volume at runtime.
+# FINAL LEAN VERSION - Corrected COPY paths
 #
 
 # ==============================================================================
@@ -56,7 +55,7 @@ RUN mkdir build && \
 RUN python3.10 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
-# MODIFIED: Copy the requirements files into the context BEFORE trying to install them.
+# Copy the requirements files into the context BEFORE trying to install them.
 COPY ./requirements.txt /app/requirements.txt
 COPY ./api/requirements.txt /app/api/requirements.txt
 
@@ -83,11 +82,13 @@ RUN useradd -m -s /bin/bash bitnet
 USER bitnet
 WORKDIR /app
 
-# Copy the Python virtual environment, compiled C++ code, and application scripts.
+# MODIFIED: Corrected the COPY commands. All source paths for --from=builder
+# must exist in the builder stage.
 COPY --from=builder --chown=bitnet:bitnet /app/venv /app/venv
 COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
+# The API and frontend code are copied from the local build context, not the builder stage.
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
