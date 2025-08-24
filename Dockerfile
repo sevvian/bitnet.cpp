@@ -1,6 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL VERIFIED VERSION - Corrects the binary output path.
+# FINAL VERIFIED PRODUCTION VERSION
 #
 
 # ==============================================================================
@@ -48,14 +48,11 @@ WORKDIR /src/BitNet
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
 # R3: Build the bitnet.cpp C++ project.
+# MODIFIED: Using the more specific x86 flag from setup_env.py and reference dockerfile.
 RUN mkdir build && \
     cd build && \
-    cmake -DBN_BUILD=ON .. && \
+    cmake -DBITNET_X86_TL2=ON .. && \
     cmake --build . --config Release
-
-# DIAGNOSTIC STEP: List the contents of the bin directory to prove the executable exists.
-RUN echo "--- Listing contents of /src/BitNet/bin/ ---" && \
-    ls -l /src/BitNet/bin/
 
 # R2: Install Python dependencies.
 RUN python3.10 -m venv /src/BitNet/venv
@@ -83,9 +80,10 @@ RUN useradd -m -s /bin/bash bitnet
 USER bitnet
 WORKDIR /app
 
-# MODIFIED: Corrected the source path for the 'main' executable based on build log evidence.
+# MODIFIED: Corrected source path and filename for the executable based on build log evidence.
+# The executable is 'llama-cli', and we rename it to 'main' for our scripts.
 COPY --from=builder --chown=bitnet:bitnet /src/BitNet/venv /app/venv
-COPY --from=builder --chown=bitnet:bitnet /src/BitNet/bin/main /app/bin/main
+COPY --from=builder --chown=bitnet:bitnet /src/BitNet/build/bin/llama-cli /app/main
 COPY --from=builder --chown=bitnet:bitnet /src/BitNet/run_inference.py /app/run_inference.py
 # Removed the copy for the non-existent 'bitnet' directory.
 
@@ -93,7 +91,7 @@ COPY --from=builder --chown=bitnet:bitnet /src/BitNet/run_inference.py /app/run_
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
-RUN chmod +x /app/run.sh
+RUN chmod +x /app/main /app/run.sh
 
 # R11: Create the directory that will serve as the mount point for the model.
 RUN mkdir -p /app/models
