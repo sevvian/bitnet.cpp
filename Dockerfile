@@ -48,7 +48,6 @@ WORKDIR /src/BitNet
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
 # R3: Build the bitnet.cpp C++ project.
-# MODIFIED: Using the more specific x86 flag from setup_env.py and reference dockerfile.
 RUN mkdir build && \
     cd build && \
     cmake -DBITNET_X86_TL2=ON .. && \
@@ -77,24 +76,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create a dedicated, non-root user for security.
 RUN useradd -m -s /bin/bash bitnet
-USER bitnet
 WORKDIR /app
 
-# MODIFIED: Corrected source path and filename for the executable based on build log evidence.
-# The executable is 'llama-cli', and we rename it to 'main' for our scripts.
-COPY --from=builder --chown=bitnet:bitnet /src/BitNet/venv /app/venv
-COPY --from=builder --chown=bitnet:bitnet /src/BitNet/build/bin/llama-cli /app/main
-COPY --from=builder --chown=bitnet:bitnet /src/BitNet/run_inference.py /app/run_inference.py
-# Removed the copy for the non-existent 'bitnet' directory.
+# Copy the necessary artifacts from the builder stage.
+COPY --from=builder /src/BitNet/venv /app/venv
+COPY --from=builder /src/BitNet/build/bin/llama-cli /app/main
+COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
 
 # The API, frontend, and scripts are copied from the local build context.
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
-RUN chmod +x /app/main /app/run.sh
 
 # R11: Create the directory that will serve as the mount point for the model.
 RUN mkdir -p /app/models
+
+# MODIFIED: Set correct permissions and ownership as root BEFORE switching user.
+RUN chmod +x /app/main /app/run.sh && \
+    chown -R bitnet:bitnet /app
+
+# MODIFIED: Switch to the non-root user as the FINAL step.
+USER bitnet
 
 # Set the PATH.
 ENV PATH="/app/venv/bin:$PATH"
