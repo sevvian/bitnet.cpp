@@ -1,5 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
+# DIAGNOSTIC VERSION: Modified to expose internal error logs.
 #
 
 # ==============================================================================
@@ -28,18 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     gnupg
 
-# R1: Install clang-18 as specified in the bitnet.cpp documentation.
+# R1: Install and configure clang-18.
 RUN wget https://apt.llvm.org/llvm.sh && \
     chmod +x llvm.sh && \
     ./llvm.sh 18 && \
-    rm llvm.sh
-
-# R1: MODIFIED - THIS IS A CRITICAL FIX.
-# The setup_env.py script calls for compilers named 'clang' and 'clang++',
-# but the llvm.sh script installs versioned executables ('clang-18').
-# We use update-alternatives to create symlinks, making the versioned
-# compilers available under the generic names the build script expects.
-RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100 && \
+    rm llvm.sh && \
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100 && \
     update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
 
 # Set up the application directory
@@ -59,12 +54,17 @@ RUN pip install --no-cache-dir "huggingface-hub[cli]"
 # R4: Download the BASE model repository, required as input for setup_env.py.
 RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T --local-dir /app/models/BitNet-b1.58-2B-4T --local-dir-use-symlinks False
 
-# R3: Execute the setup_env.py script. This script now handles the entire C++
-# compilation process, in addition to quantizing the model and preparing sources.
-RUN python setup_env.py -md /app/models/BitNet-b1.58-2B-4T -q i2_s
+# R3: Execute the setup_env.py script.
+# MODIFIED FOR DIAGNOSTICS: This command is wrapped in a shell '||' condition.
+# If the python script fails (returns a non-zero exit code), the commands after
+# '||' will execute. This will print the contents of the internal log file to the
+# build output, and then exit with an error to ensure the build stops.
+RUN python setup_env.py -md /app/models/BitNet-b1.58-2B-4T -q i2_s || \
+    (echo "---! ERROR: setup_env.py failed. Displaying internal log file !---" && \
+     cat logs/convert_to_f32_gguf.log && \
+     exit 1)
 
-# R3: MODIFIED - The manual build step below is now REDUNDANT and REMOVED,
-# as the `setup_env.py` script handles the compilation.
+# R3: The manual build step is correctly removed as setup_env.py handles compilation.
 
 # Copy API and frontend code into the builder stage
 COPY ./api /app/api
@@ -101,13 +101,11 @@ WORKDIR /app
 COPY --from=builder --chown=bitnet:bitnet /app/venv /app/venv
 
 # Copy the compiled C++ executables and Python scripts required for inference.
-# The setup_env.py script places the compiled artifacts in the 'build' directory.
 COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
 
 # R4: Copy the processed model directory into the final image.
-# The GGUF file will be located inside this directory after setup_env.py runs.
 COPY --from=builder --chown=bitnet:bitnet /app/models /app/models
 
 # Copy the API and frontend code
