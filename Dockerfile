@@ -34,7 +34,8 @@ cd BitNet && git submodule update --init --recursive
 
 # Python deps (hosted tools/scripts)
 COPY requirements.txt /workspace/requirements.txt
-RUN pip install --no-cache-dir -r /workspace/requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r /workspace/requirements.txt
+
 
 
 # Build bitnet.cpp (CPU, NO AVX/F16C/FMA for Tremont)
