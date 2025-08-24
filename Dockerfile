@@ -1,12 +1,11 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION - Includes shared library dependency.
+# FINAL VERIFIED PRODUCTION VERSION - Includes the 'install' step.
 #
 
 # ==============================================================================
 # R7: Production Grade - Use a multi-stage build to keep the final image small.
 # Stage 1: Builder
-# This stage compiles the C++ inference engine in an isolated directory.
 # ==============================================================================
 FROM ubuntu:22.04 AS builder
 
@@ -47,11 +46,17 @@ WORKDIR /src/BitNet
 # R3: Generate the required C++ kernel source files.
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
-# R3: Build the bitnet.cpp C++ project.
+# R3: Build and INSTALL the bitnet.cpp C++ project.
 RUN mkdir build && \
     cd build && \
-    cmake -DBITNET_X86_TL2=ON .. && \
-    cmake --build . --config Release
+    cmake -DBITNET_X86_TL2=ON -DCMAKE_INSTALL_PREFIX=../install .. && \
+    cmake --build . --config Release && \
+    cmake --install .
+
+# ---!!! DIAGNOSTIC AUDIT OF THE CLEAN INSTALL DIRECTORY !!!---
+RUN echo "--- [DIAGNOSTIC AUDIT START] ---" && \
+    ls -lR /src/BitNet/install && \
+    echo "--- [DIAGNOSTIC AUDIT END] ---"
 
 # R2: Install Python dependencies.
 RUN python3.10 -m venv /src/BitNet/venv
@@ -63,7 +68,6 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 # ==============================================================================
 # Stage 2: Final Image
-# This stage creates the final, minimal runtime image without the model.
 # ==============================================================================
 FROM ubuntu:22.04
 
@@ -78,17 +82,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
-# Create the directory structure the application and its libraries expect.
-RUN mkdir -p /app/build/bin /app/build/lib
+# Create the final directory structure for our application.
+RUN mkdir -p /app/bin /app/lib
 
-# Copy the necessary artifacts from the builder stage.
+# Copy the necessary artifacts from the builder's clean 'install' directory.
 COPY --from=builder /src/BitNet/venv /app/venv
-COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
-# MODIFIED: Copy the essential shared library dependency.
-COPY --from=builder /src/BitNet/build/lib/libllama.so /app/build/lib/libllama.so
-COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
+COPY --from=builder /src/BitNet/install/bin/llama-cli /app/bin/llama-cli
+# MODIFIED: Copy ALL shared libraries (*.so) from the install/lib directory.
+COPY --from=builder /src/BitNet/install/lib/*.so /app/lib/
 
-# The API, frontend, and scripts are copied from the local build context.
+# Copy our local, corrected application scripts.
+COPY ./run_inference.py /app/run_inference.py
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
@@ -97,16 +101,16 @@ COPY ./scripts/run.sh /app/run.sh
 RUN mkdir -p /app/models
 
 # Set correct permissions and ownership as root BEFORE switching user.
-RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
+RUN chmod +x /app/bin/llama-cli /app/run.sh && \
     chown -R bitnet:bitnet /app
 
 # Switch to the non-root user as the FINAL step.
 USER bitnet
 
-# MODIFIED: Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared library.
-ENV LD_LIBRARY_PATH=/app/build/lib
+# MODIFIED: Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
+ENV LD_LIBRARY_PATH=/app/lib
 # Set the PATH for our executables and python environment.
-ENV PATH="/app/venv/bin:$PATH"
+ENV PATH="/app/venv/bin:/app/bin:$PATH"
 
 # Expose the API port.
 EXPOSE 8000
