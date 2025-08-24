@@ -15,13 +15,15 @@ FROM ubuntu:22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R1: Install system dependencies required for the build.
+# MODIFIED: Changed python3.9 and python3.9-venv to python3.10 and python3.10-venv,
+# which are the native versions for Ubuntu 22.04 and satisfy the python>=3.9 requirement.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     ca-certificates \
-    python3.9 \
+    python3.10 \
     python3-pip \
-    python3.9-venv \
+    python3.10-venv \
     cmake \
     build-essential
 
@@ -38,7 +40,8 @@ WORKDIR /app
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
 # R2: Create a Python virtual environment and install dependencies for bitnet.cpp.
-RUN python3.9 -m venv /app/venv
+# MODIFIED: Use python3.10 to create the virtual environment.
+RUN python3.10 -m venv /app/venv
 # Add venv to the PATH for subsequent commands
 ENV PATH="/app/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
@@ -76,9 +79,10 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R7: Production Grade - Install only essential runtime dependencies.
+# MODIFIED: Changed python3.9 and python3.9-venv to python3.10 and python3.10-venv.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.9 \
-    python3.9-venv \
+    python3.10 \
+    python3.10-venv \
     libstdc++6 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
