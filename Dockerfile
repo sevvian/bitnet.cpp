@@ -1,5 +1,5 @@
 #
-# Dockerfile for building and running bitnet.cpp
+# Dockerfile for building and running bitnet.cpp with a web API
 #
 
 # ==============================================================================
@@ -37,7 +37,7 @@ WORKDIR /app
 # R3: Clone the BitNet repository with its submodules.
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
-# R2: Create a Python virtual environment and install dependencies.
+# R2: Create a Python virtual environment and install dependencies for bitnet.cpp.
 RUN python3.9 -m venv /app/venv
 # Add venv to the PATH for subsequent commands
 ENV PATH="/app/venv/bin:$PATH"
@@ -46,7 +46,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir "huggingface-hub[cli]"
 
 # R4: Download the specified GGUF model from Hugging Face.
-# Using a pre-quantized GGUF model simplifies the setup process.
 # We disable symlinks to ensure files are fully copied within the Docker layer.
 RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir /app/models/BitNet-b1.58-2B-4T-gguf --local-dir-use-symlinks False
 
@@ -57,6 +56,14 @@ RUN mkdir build && \
     cd build && \
     CC=clang-18 CXX=clang++-18 cmake .. && \
     cmake --build . --config Release
+
+# Copy API and frontend code into the builder stage
+COPY ./api /app/api
+COPY ./frontend /app/frontend
+
+# R2: Install API-specific Python dependencies
+RUN pip install --no-cache-dir -r /app/api/requirements.txt
+
 
 # ==============================================================================
 # Stage 2: Final Image
@@ -85,26 +92,29 @@ WORKDIR /app
 COPY --from=builder --chown=bitnet:bitnet /app/venv /app/venv
 
 # Copy the compiled C++ executables and Python scripts required for inference.
-# The 'main' executable is the core C++ inference engine.
 COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
-# The Python scripts orchestrate the inference process.
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
-# The 'bitnet' directory contains Python modules imported by run_inference.py.
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
 
 # R4: Copy the downloaded model into the final image.
 COPY --from=builder --chown=bitnet:bitnet /app/models /app/models
 
-# R5: Copy the entrypoint script and make it executable.
+# Copy the API and frontend code
+COPY --from=builder --chown=bitnet:bitnet /app/api /app/api
+COPY --from=builder --chown=bitnet:bitnet /app/frontend /app/frontend
+
+# Copy the entrypoint script and make it executable.
 COPY --chown=bitnet:bitnet scripts/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
 # Set the PATH to include the virtual environment's bin directory.
 ENV PATH="/app/venv/bin:$PATH"
 
-# R5: Define the entrypoint to our custom script for inference execution.
+# R8: Expose the port the API will run on.
+EXPOSE 8000
+
+# R5, R8: Define the entrypoint to our custom script which now starts the web server.
 ENTRYPOINT ["/app/run.sh"]
 
-# Set a default command to run in conversation mode with a system prompt.
-# This can be easily overridden when running the container.
-CMD ["-p", "You are a helpful assistant.", "-cnv"]
+# Default command for the entrypoint script (starts the server).
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
