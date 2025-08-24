@@ -29,7 +29,7 @@ class InferenceResponse(BaseModel):
 
 # --- Global Configuration ---
 # R4: Path to the model inside the container.
-MODEL_PATH = "/app/models/BitNet-b1.58-2B-4T-gguf/ggml-model-i2_s.gguf"
+MODEL_PATH = "/app/models/ggml-model-i2_s.gguf"
 INFERENCE_SCRIPT_PATH = "/app/run_inference.py"
 # R6: Number of threads to use for inference. Adjust based on N5105 capabilities (4 cores, 4 threads).
 NUM_THREADS = "4"
