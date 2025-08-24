@@ -94,9 +94,12 @@ RUN mkdir -p /app/build/bin /app/lib
 # Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
 COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
-# MODIFIED: Copy ALL shared libraries from our clean '/install/lib' directory.
 COPY --from=builder /install/lib/*.so /app/lib/
-COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
+
+# ---!!! THIS IS THE CRITICAL FIX !!!---
+# Copy OUR local, modified run_inference.py from the build context,
+# NOT the original, unmodified one from the builder stage.
+COPY ./run_inference.py /app/run_inference.py
 
 # Copy our application code.
 COPY ./api /app/api
