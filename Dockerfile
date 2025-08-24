@@ -88,14 +88,15 @@ COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
 
-# R11: Create the directory that will serve as the mount point for the model.
-RUN mkdir -p /app/models
-
-# MODIFIED: Set correct permissions and ownership as root BEFORE switching user.
+# Set correct permissions and ownership as root BEFORE switching user.
 RUN chmod +x /app/main /app/run.sh && \
     chown -R bitnet:bitnet /app
 
-# MODIFIED: Switch to the non-root user as the FINAL step.
+# R11: Create the directory that will serve as the mount point for the model.
+# This must be done before chown to ensure bitnet owns it.
+RUN mkdir -p /app/models && chown bitnet:bitnet /app/models
+
+# Switch to the non-root user as the FINAL step.
 USER bitnet
 
 # Set the PATH.
@@ -106,4 +107,7 @@ EXPOSE 8000
 
 # Define the entrypoint.
 ENTRYPOINT ["/app/run.sh"]
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# MODIFIED: Invoke uvicorn as a Python module to ensure relocatability.
+# This is the definitive fix for the 'bad interpreter' error.
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
