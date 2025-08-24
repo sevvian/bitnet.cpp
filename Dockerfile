@@ -1,6 +1,6 @@
 #
 # Dockerfile for building bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION - Includes surgical patches for upstream build system bugs.
+# FINAL VERIFIED PRODUCTION VERSION - Includes fixes for upstream build system bugs.
 #
 
 # ==============================================================================
@@ -51,19 +51,18 @@ RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320"
 # FIX: Manually copy the file to the location the script expects before building.
 RUN cp include/ggml-bitnet.h 3rdparty/llama.cpp/ggml/include/ggml-bitnet.h
 
-# BUG 2: The build fails because of compiler warnings being treated as errors.
-# FIX: Forcefully disable the GGML_FATAL_WARNINGS option in the submodule's CMakeLists.txt.
-RUN sed -i 's/option(GGML_FATAL_WARNINGS "ggml: enable -Werror flag" ON)/option(GGML_FATAL_WARNINGS "ggml: enable -Werror flag" OFF)/g' 3rdparty/llama.cpp/ggml/CMakeLists.txt
-
-# BUG 3: The src/CMakeLists.txt overwrites a variable instead of appending, losing a source file.
+# BUG 2: The src/CMakeLists.txt overwrites a variable instead of appending, losing a source file.
 # FIX: Change the second 'set' command to 'list(APPEND ...)' to correctly include all source files.
+# This prevents potential linker errors later.
 RUN sed -i 's/set(GGML_SOURCES_BITNET ggml-bitnet-lut.cpp)/list(APPEND GGML_SOURCES_BITNET ggml-bitnet-lut.cpp)/g' src/CMakeLists.txt
 # ---!!! END OF FIXES !!!---
 
-# R3: Build and INSTALL the bitnet.cpp C++ project. This will now succeed.
+
+# R3: Build and INSTALL the bitnet.cpp C++ project.
+# MODIFIED: Added -DGGML_FATAL_WARNINGS=OFF to disable warnings-as-errors, fixing the build failure.
 RUN mkdir build && \
     cd build && \
-    cmake -DBITNET_X86_TL2=ON -DCMAKE_INSTALL_PREFIX=../install .. && \
+    cmake -DBITNET_X86_TL2=ON -DGGML_FATAL_WARNINGS=OFF -DCMAKE_INSTALL_PREFIX=../install .. && \
     cmake --build . --config Release && \
     cmake --install .
 
