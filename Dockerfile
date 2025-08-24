@@ -15,8 +15,6 @@ FROM ubuntu:22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R1: Install system dependencies required for the build.
-# MODIFIED: Added 'software-properties-common' and 'gnupg' as required by the
-# llvm.sh script to add the repository and handle signing keys.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -55,11 +53,13 @@ RUN pip install --no-cache-dir "huggingface-hub[cli]"
 RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir /app/models/BitNet-b1.58-2B-4T-gguf --local-dir-use-symlinks False
 
 # R3: Build the bitnet.cpp project using CMake and Clang.
-# R6: This builds for a generic x86_64 architecture. When this Dockerfile is
-#     built on the target Intel N5105, the compiler may apply native optimizations.
+# R6: This builds for a generic x86_64 architecture.
+# MODIFIED: Added the -DBN_BUILD=ON flag. This is crucial for enabling the
+# custom BitNet kernels and linking the necessary source files, which resolves
+# the "Cannot find source file" error.
 RUN mkdir build && \
     cd build && \
-    CC=clang-18 CXX=clang++-18 cmake .. && \
+    CC=clang-18 CXX=clang++-18 cmake -DBN_BUILD=ON .. && \
     cmake --build . --config Release
 
 # Copy API and frontend code into the builder stage
