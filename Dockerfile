@@ -34,6 +34,14 @@ RUN wget https://apt.llvm.org/llvm.sh && \
     ./llvm.sh 18 && \
     rm llvm.sh
 
+# R1: MODIFIED - THIS IS A CRITICAL FIX.
+# The setup_env.py script calls for compilers named 'clang' and 'clang++',
+# but the llvm.sh script installs versioned executables ('clang-18').
+# We use update-alternatives to create symlinks, making the versioned
+# compilers available under the generic names the build script expects.
+RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+
 # Set up the application directory
 WORKDIR /app
 
@@ -48,21 +56,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # huggingface-cli is required for downloading models.
 RUN pip install --no-cache-dir "huggingface-hub[cli]"
 
-# R4: MODIFIED - Download the BASE model repository, not the pre-quantized GGUF.
-# This is required as input for the setup_env.py script.
+# R4: Download the BASE model repository, required as input for setup_env.py.
 RUN huggingface-cli download microsoft/BitNet-b1.58-2B-4T --local-dir /app/models/BitNet-b1.58-2B-4T --local-dir-use-symlinks False
 
-# R3: MODIFIED - Execute the setup_env.py script. THIS IS THE CRITICAL FIX.
-# This script prepares the environment by quantizing the model AND, crucially,
-# generating or linking the source files (like bitnet-lut-kernels.h) needed by CMake.
+# R3: Execute the setup_env.py script. This script now handles the entire C++
+# compilation process, in addition to quantizing the model and preparing sources.
 RUN python setup_env.py -md /app/models/BitNet-b1.58-2B-4T -q i2_s
 
-# R3: Build the bitnet.cpp project using CMake and Clang.
-# The -DBN_BUILD=ON flag is still required to instruct CMake to use the BitNet-specific build paths.
-RUN mkdir build && \
-    cd build && \
-    CC=clang-18 CXX=clang++-18 cmake -DBN_BUILD=ON .. && \
-    cmake --build . --config Release
+# R3: MODIFIED - The manual build step below is now REDUNDANT and REMOVED,
+# as the `setup_env.py` script handles the compilation.
 
 # Copy API and frontend code into the builder stage
 COPY ./api /app/api
@@ -99,6 +101,7 @@ WORKDIR /app
 COPY --from=builder --chown=bitnet:bitnet /app/venv /app/venv
 
 # Copy the compiled C++ executables and Python scripts required for inference.
+# The setup_env.py script places the compiled artifacts in the 'build' directory.
 COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
