@@ -1,6 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION
+# FINAL VERIFIED PRODUCTION VERSION - Conforms to script's file path expectations.
 #
 
 # ==============================================================================
@@ -78,9 +78,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
+# MODIFIED: Create the directory structure the run_inference.py script expects.
+RUN mkdir -p /app/build/bin
+
 # Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
-COPY --from=builder /src/BitNet/build/bin/llama-cli /app/main
+# MODIFIED: Copy the executable to the EXACT path the script requires.
+COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
 COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
 
 # The API, frontend, and scripts are copied from the local build context.
@@ -88,13 +92,13 @@ COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
 
-# Set correct permissions and ownership as root BEFORE switching user.
-RUN chmod +x /app/main /app/run.sh && \
-    chown -R bitnet:bitnet /app
-
 # R11: Create the directory that will serve as the mount point for the model.
-# This must be done before chown to ensure bitnet owns it.
-RUN mkdir -p /app/models && chown bitnet:bitnet /app/models
+RUN mkdir -p /app/models
+
+# Set correct permissions and ownership as root BEFORE switching user.
+# MODIFIED: Update chmod path to match the new executable location.
+RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
+    chown -R bitnet:bitnet /app
 
 # Switch to the non-root user as the FINAL step.
 USER bitnet
@@ -107,7 +111,4 @@ EXPOSE 8000
 
 # Define the entrypoint.
 ENTRYPOINT ["/app/run.sh"]
-
-# MODIFIED: Invoke uvicorn as a Python module to ensure relocatability.
-# This is the definitive fix for the 'bad interpreter' error.
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
