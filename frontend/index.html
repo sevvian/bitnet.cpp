@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- R9: Frontend for BitNet.cpp LLM -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitNet.cpp - Metadata Extractor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>BitNet.cpp Metadata Extractor</h1>
+            <!-- R9.7: Theme switcher -->
+            <div class="theme-switcher">
+                <label for="theme">Theme:</label>
+                <select id="theme">
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+        </header>
+
+        <main>
+            <!-- R9.1: System prompt area -->
+            <div class="prompt-section">
+                <label for="system-prompt">System Prompt (Few-Shot Examples)</label>
+                <textarea id="system-prompt" rows="15"></textarea>
+            </div>
+
+            <!-- R9.2: Batch input area -->
+            <div class="input-section">
+                <label for="batch-input">Batch Torrent Titles (one per line)</label>
+                <textarea id="batch-input" rows="10" placeholder="e.g., The.Matrix.1999.1080p.BluRay.x264-FLAWLESS"></textarea>
+            </div>
+
+            <!-- R9.3: Action button -->
+            <button id="parse-button">Parse Metadata</button>
+            <div id="loader" class="loader hidden"></div>
+
+            <!-- R9.5 & R9.6: Results section -->
+            <div class="results-section">
+                <div class="results-header">
+                    <h2>Results</h2>
+                    <button id="toggle-all-button" class="visibility-toggle" disabled>Toggle All Outputs</button>
+                </div>
+                <div id="results-container">
+                    <p class="placeholder">Results will be displayed here...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
