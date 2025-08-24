@@ -1,6 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION - Conforms to script's file path expectations.
+# FINAL VERIFIED PRODUCTION VERSION - Includes shared library dependency.
 #
 
 # ==============================================================================
@@ -78,13 +78,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
-# MODIFIED: Create the directory structure the run_inference.py script expects.
-RUN mkdir -p /app/build/bin
+# Create the directory structure the application and its libraries expect.
+RUN mkdir -p /app/build/bin /app/build/lib
 
 # Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
-# MODIFIED: Copy the executable to the EXACT path the script requires.
 COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
+# MODIFIED: Copy the essential shared library dependency.
+COPY --from=builder /src/BitNet/build/lib/libllama.so /app/build/lib/libllama.so
 COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
 
 # The API, frontend, and scripts are copied from the local build context.
@@ -96,14 +97,15 @@ COPY ./scripts/run.sh /app/run.sh
 RUN mkdir -p /app/models
 
 # Set correct permissions and ownership as root BEFORE switching user.
-# MODIFIED: Update chmod path to match the new executable location.
 RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
     chown -R bitnet:bitnet /app
 
 # Switch to the non-root user as the FINAL step.
 USER bitnet
 
-# Set the PATH.
+# MODIFIED: Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared library.
+ENV LD_LIBRARY_PATH=/app/build/lib
+# Set the PATH for our executables and python environment.
 ENV PATH="/app/venv/bin:$PATH"
 
 # Expose the API port.
