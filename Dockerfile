@@ -1,6 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION - Includes the 'install' step.
+# FINAL VERIFIED PRODUCTION VERSION - Includes surgical fix for upstream install bug.
 #
 
 # ==============================================================================
@@ -46,17 +46,17 @@ WORKDIR /src/BitNet
 # R3: Generate the required C++ kernel source files.
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
-# R3: Build and INSTALL the bitnet.cpp C++ project.
+# ---!!! THIS IS THE SURGICAL FIX FOR THE UPSTREAM BUG !!!---
+# The submodule's install script looks for ggml-bitnet.h in the wrong place.
+# We manually copy the file to the location the script expects before building.
+RUN cp include/ggml-bitnet.h 3rdparty/llama.cpp/ggml/include/ggml-bitnet.h
+
+# R3: Build and INSTALL the bitnet.cpp C++ project. This will now succeed.
 RUN mkdir build && \
     cd build && \
     cmake -DBITNET_X86_TL2=ON -DCMAKE_INSTALL_PREFIX=../install .. && \
     cmake --build . --config Release && \
     cmake --install .
-
-# ---!!! DIAGNOSTIC AUDIT OF THE CLEAN INSTALL DIRECTORY !!!---
-RUN echo "--- [DIAGNOSTIC AUDIT START] ---" && \
-    ls -lR /src/BitNet/install && \
-    echo "--- [DIAGNOSTIC AUDIT END] ---"
 
 # R2: Install Python dependencies.
 RUN python3.10 -m venv /src/BitNet/venv
@@ -88,7 +88,6 @@ RUN mkdir -p /app/bin /app/lib
 # Copy the necessary artifacts from the builder's clean 'install' directory.
 COPY --from=builder /src/BitNet/venv /app/venv
 COPY --from=builder /src/BitNet/install/bin/llama-cli /app/bin/llama-cli
-# MODIFIED: Copy ALL shared libraries (*.so) from the install/lib directory.
 COPY --from=builder /src/BitNet/install/lib/*.so /app/lib/
 
 # Copy our local, corrected application scripts.
@@ -107,7 +106,7 @@ RUN chmod +x /app/bin/llama-cli /app/run.sh && \
 # Switch to the non-root user as the FINAL step.
 USER bitnet
 
-# MODIFIED: Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
+# Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
 ENV LD_LIBRARY_PATH=/app/lib
 # Set the PATH for our executables and python environment.
 ENV PATH="/app/venv/bin:/app/bin:$PATH"
