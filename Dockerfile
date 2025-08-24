@@ -1,6 +1,6 @@
 #
 # Dockerfile for building bitnet.cpp with a web API
-# FINAL VERIFIED PRODUCTION VERSION - Includes surgical patch for upstream build system bugs.
+# FINAL VERSION: Based on the successful Raspberry Pi guide workflow, adapted for x86_64.
 #
 
 # ==============================================================================
@@ -12,7 +12,8 @@ FROM ubuntu:22.04 AS builder
 # Set a non-interactive frontend for package installations
 ENV DEBIAN_FRONTEND=noninteractive
 
-# R1: Install system dependencies required for the build.
+# R1: Step 1 & 2 from guide - Install system tools and Clang.
+# We include all previously identified dependencies for a clean build.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -25,53 +26,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     software-properties-common \
     gnupg
-
-# R1: Install and configure clang-18.
 RUN wget https://apt.llvm.org/llvm.sh && \
     chmod +x llvm.sh && \
     ./llvm.sh 18 && \
-    rm llvm.sh && \
-    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+    rm llvm.sh
 
 # Create a dedicated source directory for isolation.
 WORKDIR /src
 
-# R3: Clone the BitNet repository into a subdirectory named 'BitNet'.
+# R3: Step 4 from guide - Clone the BitNet repository.
 RUN git clone --recursive https://github.com/microsoft/BitNet.git
 
 # Change working directory into the cloned repo.
 WORKDIR /src/BitNet
 
-# R3: Generate the required C++ kernel source files.
-RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
+# R2: Step 4 from guide - Install Python dependencies into a venv.
+RUN python3.10 -m venv venv
+SHELL ["/bin/bash", "-c"]
+RUN source venv/bin/activate && \
+    pip install --no-cache-dir -r requirements.txt
 
-# ---!!! SURGICAL FIXES FOR UPSTREAM BUGS !!!---
-# BUG 1: The ggml submodule's install script looks for ggml-bitnet.h in the wrong place.
-# FIX: Manually copy the file to the location the script expects before building.
-RUN cp include/ggml-bitnet.h 3rdparty/llama.cpp/ggml/include/ggml-bitnet.h
+# R3: Step 5 from guide - Generate the LUT kernels.
+# ADAPTED FOR x86: We use codegen_tl2.py as required for our architecture.
+RUN source venv/bin/activate && \
+    python utils/codegen_tl2.py \
+      --model bitnet_b_58-3B \
+      --BM 160,320,320 \
+      --BK 96,96,96 \
+      --bm 32,32,32
 
-# BUG 2: The build fails because of compiler warnings being treated as errors.
-# FIX: Forcefully disable the GGML_FATAL_WARNINGS option in the submodule's CMakeLists.txt.
-RUN sed -i 's/option(GGML_FATAL_WARNINGS "ggml: enable -Werror flag" ON)/option(GGML_FATAL_WARNINGS "ggml: enable -Werror flag" OFF)/g' 3rdparty/llama.cpp/ggml/CMakeLists.txt
-
-# BUG 3: The src/CMakeLists.txt overwrites a variable instead of appending, losing a source file.
-# FIX: Change the second 'set' command to 'list(APPEND ...)' to correctly include all source files.
-RUN sed -i 's/set(GGML_SOURCES_BITNET ggml-bitnet-lut.cpp)/list(APPEND GGML_SOURCES_BITNET ggml-bitnet-lut.cpp)/g' src/CMakeLists.txt
-# ---!!! END OF FIXES !!!---
-
-# R3: Build and INSTALL the bitnet.cpp C++ project. This will now succeed.
+# R3: Step 6 from guide - Build with Clang.
+# This bypasses the broken setup_env.py and all its associated bugs.
 RUN mkdir build && \
     cd build && \
-    cmake -DBITNET_X86_TL2=ON -DCMAKE_INSTALL_PREFIX=../install .. && \
-    cmake --build . --config Release && \
-    cmake --install .
+    export CC=clang-18 CXX=clang++-18 && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --parallel $(nproc)
 
-# R2: Install Python dependencies.
-RUN python3.10 -m venv /src/BitNet/venv
-ENV PATH="/src/BitNet/venv/bin:$PATH"
+# Install API dependencies in the same venv.
 COPY ./api/requirements.txt /tmp/api_requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt && \
+RUN source venv/bin/activate && \
     pip install --no-cache-dir -r /tmp/api_requirements.txt
 
 
@@ -91,16 +85,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
-# Create the final directory structure for our application.
-RUN mkdir -p /app/build/bin /app/lib
+# Create the directory structure the run_inference.py script expects.
+RUN mkdir -p /app/build/bin
 
-# Copy the necessary artifacts from the builder's clean 'install' directory.
+# Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
-COPY --from=builder /src/BitNet/install/bin/llama-cli /app/build/bin/llama-cli
-COPY --from=builder /src/BitNet/install/lib/*.so /app/lib/
+COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
+COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
 
-# Copy our local, corrected application scripts.
-COPY ./run_inference.py /app/run_inference.py
+# Copy our application code.
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
@@ -115,8 +108,10 @@ RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
 # Switch to the non-root user as the FINAL step.
 USER bitnet
 
-# Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
-ENV LD_LIBRARY_PATH=/app/lib
+# Set the LD_LIBRARY_PATH to handle any shared libraries.
+# While the RPi guide doesn't mention it, our previous debugging proved it's
+# necessary for a clean container, so we will keep this robust fix.
+ENV LD_LIBRARY_PATH=/app/build/lib
 # Set the PATH for our executables and python environment.
 ENV PATH="/app/venv/bin:$PATH"
 
