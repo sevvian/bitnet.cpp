@@ -1,10 +1,10 @@
 #
 # Dockerfile for building bitnet.cpp with a web API
-# FINAL DIAGNOSTIC VERSION: This file will audit its own build output to find the exact
-# location of the compiled binaries AND all shared libraries.
+# FINAL VERIFIED PRODUCTION VERSION - Based on diagnostic audit of build artifacts.
 #
 
 # ==============================================================================
+# R7: Production Grade - Use a multi-stage build to keep the final image small.
 # Stage 1: Builder
 # ==============================================================================
 FROM ubuntu:22.04 AS builder
@@ -60,12 +60,11 @@ RUN mkdir build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release && \
     cmake --build . --parallel $(nproc)
 
-# ---!!! THIS IS THE NEW DIAGNOSTIC STEP !!!---
-# Since we know the build succeeds, we will now find all the artifacts.
-RUN echo "--- [DIAGNOSTIC AUDIT START] ---" && \
-    echo "--- Auditing build output directory recursively: /src/BitNet/build/ ---" && \
-    ls -lR /src/BitNet/build/ && \
-    echo "--- [DIAGNOSTIC AUDIT END] ---"
+# ---!!! FINAL ARTIFACT GATHERING STEP !!!---
+# The build is successful, but libraries are scattered. We will find all .so files
+# and copy them to a clean 'install' directory for easy packaging.
+RUN mkdir -p /install/lib && \
+    find /src/BitNet/build -name "*.so" -exec cp {} /install/lib/ \;
 
 # Install API dependencies in the same venv.
 COPY ./api/requirements.txt /tmp/api_requirements.txt
@@ -89,24 +88,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
-# The COPY commands below will be corrected after the diagnostic audit.
-# For now, we expect them to fail, which is part of the plan.
+# Create the final directory structure for our application.
 RUN mkdir -p /app/build/bin /app/lib
 
+# Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
 COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
-COPY --from=builder /src/BitNet/build/lib/*.so /app/lib/
+# MODIFIED: Copy ALL shared libraries from our clean '/install/lib' directory.
+COPY --from=builder /install/lib/*.so /app/lib/
 COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
+
+# Copy our application code.
 COPY ./api /app/api
 COPY ./frontend /app/frontend
 COPY ./scripts/run.sh /app/run.sh
 
+# R11: Create the directory that will serve as the mount point for the model.
 RUN mkdir -p /app/models
+
+# Set correct permissions and ownership as root BEFORE switching user.
 RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
     chown -R bitnet:bitnet /app
+
+# Switch to the non-root user as the FINAL step.
 USER bitnet
+
+# Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
 ENV LD_LIBRARY_PATH=/app/lib
+# Set the PATH for our python environment.
 ENV PATH="/app/venv/bin:$PATH"
+
+# Expose the API port.
 EXPOSE 8000
+
+# Define the entrypoint.
 ENTRYPOINT ["/app/run.sh"]
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
