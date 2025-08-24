@@ -47,10 +47,10 @@ RUN source venv/bin/activate && \
     pip install --no-cache-dir -r requirements.txt
 
 # R3: Step 5 from guide - Generate the LUT kernels.
-# ADAPTED FOR x86: We use codegen_tl2.py as required for our architecture.
+# MODIFIED: Corrected the typo in the --model argument from 'bitnet_b_58-3B' to 'bitnet_b1_58-3B'.
 RUN source venv/bin/activate && \
     python utils/codegen_tl2.py \
-      --model bitnet_b_58-3B \
+      --model bitnet_b1_58-3B \
       --BM 160,320,320 \
       --BK 96,96,96 \
       --bm 32,32,32
@@ -86,11 +86,14 @@ RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
 # Create the directory structure the run_inference.py script expects.
-RUN mkdir -p /app/build/bin
+RUN mkdir -p /app/build/bin /app/lib
 
 # Copy the necessary artifacts from the builder stage.
 COPY --from=builder /src/BitNet/venv /app/venv
 COPY --from=builder /src/BitNet/build/bin/llama-cli /app/build/bin/llama-cli
+# Copy all shared libraries to prevent runtime errors.
+COPY --from=builder /src/BitNet/build/lib/*.so /app/lib/
+# We use the upstream run_inference.py and conform our container to its expectations.
 COPY --from=builder /src/BitNet/run_inference.py /app/run_inference.py
 
 # Copy our application code.
@@ -108,10 +111,8 @@ RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
 # Switch to the non-root user as the FINAL step.
 USER bitnet
 
-# Set the LD_LIBRARY_PATH to handle any shared libraries.
-# While the RPi guide doesn't mention it, our previous debugging proved it's
-# necessary for a clean container, so we will keep this robust fix.
-ENV LD_LIBRARY_PATH=/app/build/lib
+# Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
+ENV LD_LIBRARY_PATH=/app/lib
 # Set the PATH for our executables and python environment.
 ENV PATH="/app/venv/bin:$PATH"
 
