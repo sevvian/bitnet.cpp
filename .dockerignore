@@ -1,0 +1,8 @@
+.git 
+.github 
+**/pycache 
+*.pyc 
+models 
+logs 
+node_modules
+.DS_Store
