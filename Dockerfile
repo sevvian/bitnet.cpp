@@ -1,94 +1,83 @@
-# Base: Ubuntu 24.04 (has recent clang / cmake)
-FROM ubuntu:24.04
+# Base image
+FROM ubuntu:22.04
 
+# Set non-interactive
+ENV DEBIAN_FRONTEND=noninteractive
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG HF_REPO=microsoft/BitNet-b1.58-2B-4T-gguf
-ARG MODEL_SUBDIR=BitNet-b1.58-2B-4T
-ARG QUANT=i2_s
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-venv \
+    clang-18 \
+    lld-18 \
+    ninja-build \
+    wget \
+    curl \
+    unzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-git ca-certificates curl wget build-essential \
-python3 python3-pip python3-venv \
-cmake ninja-build \
-clang-18 lld-18 libomp-18-dev \
-git-lfs \
-&& rm -rf /var/lib/apt/lists/*
-
-
-# Default python
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
-
-
-# Workspace
+# Set workspace
 WORKDIR /workspace
 
+# Clone BitNet repo + submodules
+RUN git clone https://github.com/microsoft/BitNet.git && \
+    cd BitNet && \
+    git submodule sync --recursive && \
+    git submodule update --init --recursive --force
 
-# Clone BitNet with submodules
-RUN git lfs install && \
-git clone --recursive https://github.com/microsoft/BitNet.git && \
-cd BitNet && git submodule update --init --recursive
+# Install Python deps first (gguf-py)
+RUN pip3 install --no-cache-dir ./BitNet/3rdparty/llama.cpp/gguf-py
 
-
-# Python deps (hosted tools/scripts)
+# Copy custom API & frontend
+COPY ./api /workspace/api
+COPY ./frontend /workspace/frontend
 COPY requirements.txt /workspace/requirements.txt
-RUN pip install --no-cache-dir --break-system-packages -r /workspace/requirements.txt
 
+# Install Python requirements
+RUN python3 -m venv /workspace/venv && \
+    . /workspace/venv/bin/activate && \
+    pip install --no-cache-dir -r /workspace/requirements.txt
 
+# Ensure models directory exists
+RUN mkdir -p /workspace/models/BitNet-b1.58-2B-4T
 
-# Build bitnet.cpp (CPU, NO AVX/F16C/FMA for Tremont)
-# We go through the repo’s Python build path which calls CMake under the hood.
-ENV CC=clang-18 CXX=clang++-18
+# Download model (using hf CLI)
+RUN if [ -n "microsoft/BitNet-b1.58-2B-4T-gguf" ]; then \
+        huggingface-cli download "microsoft/BitNet-b1.58-2B-4T-gguf" --local-dir /workspace/models/BitNet-b1.58-2B-4T || true ; \
+    fi
 
+# Run BitNet setup environment
+RUN cd BitNet && python3 setup_env.py -md /workspace/models/BitNet-b1.58-2B-4T -q i2_s
 
-# Pre-fetch model into mounted /workspace/models (if present). Will also work offline.
-RUN mkdir -p /workspace/models/${MODEL_SUBDIR}
-
-
-# Optional: fetch model at build time (skippable if you prefer volume-only)
-# Using huggingface-cli honors HF_TOKEN if set at build-time.
-RUN if [ -n "$HF_REPO" ]; then \
-huggingface-cli download "$HF_REPO" --local-dir /workspace/models/${MODEL_SUBDIR} || true ; \
-fi
-
-
-# Prepare environment (quantization and paths)
+# Generate missing LUT kernels if absent
 RUN cd BitNet && \
-python setup_env.py -md /workspace/models/${MODEL_SUBDIR} -q ${QUANT} || true
+    if [ ! -f include/bitnet-lut-kernels.h ]; then \
+        echo "Generating missing LUT kernels header..." && \
+        python3 scripts/gen_lut.py; \
+    fi
 
+# Build BitNet with CMake
+RUN cd BitNet && mkdir -p build && cd build && \
+    cmake -G Ninja .. \
+    -DCMAKE_C_COMPILER=clang-18 \
+    -DCMAKE_CXX_COMPILER=clang++-18 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLAMA_NATIVE=OFF \
+    -DLLAMA_AVX=OFF \
+    -DLLAMA_AVX2=OFF \
+    -DLLAMA_F16C=OFF \
+    -DLLAMA_FMA=OFF \
+    -DLLAMA_OPENMP=ON && \
+    ninja
 
-# Explicit CMake build with safe flags for N5105 (no AVX/AVX2/F16C/FMA)
-RUN cmake -S BitNet -B BitNet/build \
--G Ninja \
--DCMAKE_C_COMPILER=clang-18 \
--DCMAKE_CXX_COMPILER=clang++-18 \
--DCMAKE_BUILD_TYPE=Release \
--DLLAMA_NATIVE=OFF \
--DLLAMA_AVX=OFF \
--DLLAMA_AVX2=OFF \
--DLLAMA_F16C=OFF \
--DLLAMA_FMA=OFF \
--DLLAMA_OPENMP=ON \
-&& cmake --build BitNet/build --target all
-
-
-# App server
-COPY app /workspace/app
-COPY entrypoint.sh /workspace/entrypoint.sh
-RUN chmod +x /workspace/entrypoint.sh
-
-
-ENV PATH="/workspace/BitNet/build/bin:$PATH"
-
-
+# Expose API port
 EXPOSE 8000
 
-
-# Non-root user
-RUN useradd -m -u 1000 runner && chown -R runner:runner /workspace
-USER runner
-
-
-ENTRYPOINT ["/workspace/entrypoint.sh"]
+# Set default command to run API (assumes FastAPI/uvicorn)
+WORKDIR /workspace/api
+CMD ["/workspace/venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
