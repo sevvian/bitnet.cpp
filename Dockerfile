@@ -1,12 +1,13 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL PRODUCTION VERSION
+# FINAL LEAN VERSION - This image does NOT contain the model.
+# The model must be mounted as a volume at runtime.
 #
 
 # ==============================================================================
 # R7: Production Grade - Use a multi-stage build to keep the final image small.
 # Stage 1: Builder
-# This stage compiles the C++ inference engine and downloads the pre-built GGUF model.
+# This stage compiles the C++ inference engine ONLY.
 # ==============================================================================
 FROM ubuntu:22.04 AS builder
 
@@ -42,7 +43,6 @@ WORKDIR /app
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
 # R3: Generate the required C++ kernel source files. This is a lightweight, mandatory step.
-# Based on the setup_env.py logic for x86_64, this is the correct codegen script to run.
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
 # R3: Build the bitnet.cpp C++ project using CMake and Clang.
@@ -51,26 +51,23 @@ RUN mkdir build && \
     cmake -DBN_BUILD=ON .. && \
     cmake --build . --config Release
 
-# R4: Download the RELIABLE, PRE-BUILT GGUF model directly. This bypasses the failing conversion script.
-RUN python3.10 -m venv /app/venv && . /app/venv/bin/activate && \
-    pip install --no-cache-dir "huggingface-hub[cli]" && \
-    huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir /app/models/BitNet-b1.58-2B-4T-gguf --local-dir-use-symlinks False
-
 # R2: Install Python dependencies for our application.
-# The venv is already created, we just add our dependencies.
-RUN . /app/venv/bin/activate && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r api/requirements.txt
+# First, create the virtual environment.
+RUN python3.10 -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
 
-# Copy our API and frontend code into the builder for the next stage.
-COPY ./api /app/api
-COPY ./frontend /app/frontend
-COPY ./scripts /app/scripts
+# MODIFIED: Copy the requirements files into the context BEFORE trying to install them.
+COPY ./requirements.txt /app/requirements.txt
+COPY ./api/requirements.txt /app/api/requirements.txt
+
+# Now, install the dependencies since the files are present.
+RUN pip install --no-cache-dir -r /app/requirements.txt && \
+    pip install --no-cache-dir -r /app/api/requirements.txt
 
 
 # ==============================================================================
 # Stage 2: Final Image
-# This stage creates the final, minimal runtime image.
+# This stage creates the final, minimal runtime image without the model.
 # ==============================================================================
 FROM ubuntu:22.04
 
@@ -91,13 +88,13 @@ COPY --from=builder --chown=bitnet:bitnet /app/venv /app/venv
 COPY --from=builder --chown=bitnet:bitnet /app/build/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /app/run_inference.py /app/run_inference.py
 COPY --from=builder --chown=bitnet:bitnet /app/bitnet /app/bitnet
-COPY --from=builder --chown=bitnet:bitnet /app/api /app/api
-COPY --from=builder --chown=bitnet:bitnet /app/frontend /app/frontend
-COPY --from=builder --chown=bitnet:bitnet /app/scripts/run.sh /app/run.sh
+COPY ./api /app/api
+COPY ./frontend /app/frontend
+COPY ./scripts/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
-# R4: Copy the pre-built GGUF model into the final image.
-COPY --from=builder --chown=bitnet:bitnet /app/models/BitNet-b1.58-2B-4T-gguf/ggml-model-i2_s.gguf /app/models/ggml-model-i2_s.gguf
+# R11: Create the directory that will serve as the mount point for the model.
+RUN mkdir -p /app/models
 
 # Set the PATH.
 ENV PATH="/app/venv/bin:$PATH"
