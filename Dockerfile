@@ -1,5 +1,5 @@
 #
-# Dockerfile for building bitnet.cpp with a web API
+# Dockerfile for building and running bitnet.cpp with a web API
 # FINAL VERIFIED PRODUCTION VERSION - Includes fixes for upstream build system bugs.
 #
 
@@ -46,7 +46,7 @@ WORKDIR /src/BitNet
 # R3: Generate the required C++ kernel source files.
 RUN python3.10 utils/codegen_tl2.py --model "bitnet_b1_58-3B" --BM "160,320,320" --BK "96,96,96" --bm "32,32,32"
 
-# Surgical fix for the buggy install script.
+# Surgical fix for the buggy install script's missing header file.
 RUN cp include/ggml-bitnet.h 3rdparty/llama.cpp/ggml/include/ggml-bitnet.h
 
 # R3: Build and INSTALL the bitnet.cpp C++ project.
@@ -61,8 +61,8 @@ RUN mkdir build && \
 RUN python3.10 -m venv /src/BitNet/venv
 ENV PATH="/src/BitNet/venv/bin:$PATH"
 COPY ./api/requirements.txt /tmp/api_requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r /tmp/api_requirements.txt
+# MODIFIED: Use the local requirements.txt which is just the API requirements
+RUN pip install --no-cache-dir -r /tmp/api_requirements.txt
 
 
 # ==============================================================================
@@ -82,11 +82,11 @@ RUN useradd -m -s /bin/bash bitnet
 WORKDIR /app
 
 # Create the final directory structure for our application.
-RUN mkdir -p /app/bin /app/lib
+RUN mkdir -p /app/build/bin /app/lib
 
 # Copy the necessary artifacts from the builder's clean 'install' directory.
 COPY --from=builder /src/BitNet/venv /app/venv
-COPY --from=builder /src/BitNet/install/bin/llama-cli /app/bin/llama-cli
+COPY --from=builder /src/BitNet/install/bin/llama-cli /app/build/bin/llama-cli
 COPY --from=builder /src/BitNet/install/lib/*.so /app/lib/
 
 # Copy our local, corrected application scripts.
@@ -99,7 +99,7 @@ COPY ./scripts/run.sh /app/run.sh
 RUN mkdir -p /app/models
 
 # Set correct permissions and ownership as root BEFORE switching user.
-RUN chmod +x /app/bin/llama-cli /app/run.sh && \
+RUN chmod +x /app/build/bin/llama-cli /app/run.sh && \
     chown -R bitnet:bitnet /app
 
 # Switch to the non-root user as the FINAL step.
@@ -108,7 +108,7 @@ USER bitnet
 # Set the LD_LIBRARY_PATH to tell the OS where to find our custom shared libraries.
 ENV LD_LIBRARY_PATH=/app/lib
 # Set the PATH for our executables and python environment.
-ENV PATH="/app/venv/bin:/app/bin:$PATH"
+ENV PATH="/app/venv/bin:$PATH"
 
 # Expose the API port.
 EXPOSE 8000
