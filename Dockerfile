@@ -15,8 +15,8 @@ FROM ubuntu:22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R1: Install system dependencies required for the build.
-# MODIFIED: Changed python3.9 and python3.9-venv to python3.10 and python3.10-venv,
-# which are the native versions for Ubuntu 22.04 and satisfy the python>=3.9 requirement.
+# MODIFIED: Added 'lsb-release' which is a dependency for the llvm.sh script
+# to correctly identify the OS distribution.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
@@ -25,7 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3.10-venv \
     cmake \
-    build-essential
+    build-essential \
+    lsb-release
 
 # R1: Install clang-18 as specified in the bitnet.cpp documentation.
 RUN wget https://apt.llvm.org/llvm.sh && \
@@ -40,7 +41,6 @@ WORKDIR /app
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
 # R2: Create a Python virtual environment and install dependencies for bitnet.cpp.
-# MODIFIED: Use python3.10 to create the virtual environment.
 RUN python3.10 -m venv /app/venv
 # Add venv to the PATH for subsequent commands
 ENV PATH="/app/venv/bin:$PATH"
@@ -79,7 +79,6 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # R7: Production Grade - Install only essential runtime dependencies.
-# MODIFIED: Changed python3.9 and python3.9-venv to python3.10 and python3.10-venv.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 \
     python3.10-venv \
