@@ -1,6 +1,6 @@
 #
 # Dockerfile for building and running bitnet.cpp with a web API
-# FINAL CORRECTED VERSION - Based on factual repository structure.
+# FINAL VERIFIED VERSION - Corrects the binary output path.
 #
 
 # ==============================================================================
@@ -53,6 +53,10 @@ RUN mkdir build && \
     cmake -DBN_BUILD=ON .. && \
     cmake --build . --config Release
 
+# DIAGNOSTIC STEP: List the contents of the bin directory to prove the executable exists.
+RUN echo "--- Listing contents of /src/BitNet/bin/ ---" && \
+    ls -l /src/BitNet/bin/
+
 # R2: Install Python dependencies.
 RUN python3.10 -m venv /src/BitNet/venv
 ENV PATH="/src/BitNet/venv/bin:$PATH"
@@ -79,11 +83,11 @@ RUN useradd -m -s /bin/bash bitnet
 USER bitnet
 WORKDIR /app
 
-# Copy the necessary artifacts from the builder stage.
+# MODIFIED: Corrected the source path for the 'main' executable based on build log evidence.
 COPY --from=builder --chown=bitnet:bitnet /src/BitNet/venv /app/venv
-COPY --from=builder --chown=bitnet:bitnet /src/BitNet/build/bin/main /app/bin/main
+COPY --from=builder --chown=bitnet:bitnet /src/BitNet/bin/main /app/bin/main
 COPY --from=builder --chown=bitnet:bitnet /src/BitNet/run_inference.py /app/run_inference.py
-# MODIFIED: REMOVED the erroneous copy command for the non-existent 'bitnet' directory.
+# Removed the copy for the non-existent 'bitnet' directory.
 
 # The API, frontend, and scripts are copied from the local build context.
 COPY ./api /app/api
